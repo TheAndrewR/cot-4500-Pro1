@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whatnot Giveaway Tracker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface2: #242424;
+      --border: #2e2e2e;
+      --accent: #ff5e00;
+      --accent-hover: #ff7a2e;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --text: #f5f5f5;
+      --text-muted: #888;
+      --radius: 10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 32px 16px 64px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    header {
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    header h1 span {
+      color: var(--accent);
+    }
+
+    header p {
+      margin-top: 6px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    /* Add streamer */
+    .add-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .add-section h2 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-row input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 9px 12px;
+      font-size: 0.95rem;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .input-row input:focus {
+      border-color: var(--accent);
+    }
+
+    .input-row input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .btn {
+      padding: 9px 18px;
+      border: none;
+      border-radius: 7px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: var(--accent-hover); }
+
+    .btn-ghost {
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover { color: var(--text); border-color: #555; }
+
+    /* Active giveaways */
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 99px;
+    }
+
+    .giveaway-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .giveaway-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: border-color 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .giveaway-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: var(--progress, 100%);
+      height: 3px;
+      background: var(--bar-color, var(--green));
+      transition: width 1s linear, background 0.5s;
+    }
+
+    .giveaway-card.urgent {
+      border-color: var(--red);
+    }
+
+    .giveaway-card.warning {
+      border-color: var(--yellow);
+    }
+
+    .rank {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--text-muted);
+      width: 22px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .rank.top { color: var(--accent); }
+
+    .streamer-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .streamer-name {
+      font-weight: 600;
+      font-size: 1rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .countdown {
+      font-size: 1.5rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -1px;
+      flex-shrink: 0;
+      min-width: 64px;
+      text-align: right;
+    }
+
+    .countdown.green { color: var(--green); }
+    .countdown.yellow { color: var(--yellow); }
+    .countdown.red { color: var(--red); }
+
+    .card-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      border-radius: 5px;
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: #666;
+      border: 1px solid var(--border);
+    }
+
+    .btn-danger:hover { color: var(--red); border-color: var(--red); }
+
+    /* Streamer list (idle) */
+    .streamer-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .streamer-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .streamer-row .name {
+      flex: 1;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      padding: 20px 0;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      transition: transform 0.25s ease;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 100;
+    }
+
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* End alert overlay */
+    #alertBanner {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: var(--red);
+      color: #fff;
+      text-align: center;
+      padding: 10px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      z-index: 200;
+      animation: pulse 0.5s ease infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { opacity: 1; }
+      to { opacity: 0.75; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Whatnot <span>Giveaway</span> Tracker</h1>
+    <p>Add streamers, then hit Start when you see a giveaway pin. Sorted by soonest to end.</p>
+  </header>
+
+  <!-- Add streamer -->
+  <div class="add-section">
+    <h2>Add Streamer</h2>
+    <div class="input-row">
+      <input id="usernameInput" type="text" placeholder="e.g. sneakerking99" autocomplete="off" spellcheck="false" />
+      <button class="btn btn-primary" id="addBtn">Add</button>
+    </div>
+  </div>
+
+  <!-- Active giveaways -->
+  <div>
+    <div class="section-label">
+      Active Giveaways
+      <span class="badge" id="activeCount">0</span>
+    </div>
+    <div class="giveaway-list" id="giveawayList">
+      <div class="empty" id="giveawayEmpty">No active giveaways. Hit Start on a streamer below.</div>
+    </div>
+  </div>
+
+  <!-- Tracked streamers -->
+  <div>
+    <div class="section-label">Tracked Streamers</div>
+    <div class="streamer-list" id="streamerList">
+      <div class="empty" id="streamerEmpty">No streamers added yet.</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="alertBanner" id="alertBanner"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+const DURATION = 5 * 60 * 1000; // 5 minutes
+
+let streamers = [];   // [{ username }]
+let giveaways = {};   // { username: { startTime } }
+
+const STORAGE_KEY_STREAMERS = 'wn_streamers';
+const STORAGE_KEY_GIVEAWAYS = 'wn_giveaways';
+
+function loadState() {
+  try {
+    const s = localStorage.getItem(STORAGE_KEY_STREAMERS);
+    const g = localStorage.getItem(STORAGE_KEY_GIVEAWAYS);
+    if (s) streamers = JSON.parse(s);
+    if (g) {
+      const raw = JSON.parse(g);
+      const now = Date.now();
+      // Discard expired giveaways on load
+      giveaways = Object.fromEntries(
+        Object.entries(raw).filter(([, v]) => now - v.startTime < DURATION)
+      );
+    }
+  } catch (_) {}
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY_STREAMERS, JSON.stringify(streamers));
+  localStorage.setItem(STORAGE_KEY_GIVEAWAYS, JSON.stringify(giveaways));
+}
+
+// ── Giveaway control ──────────────────────────────────────────────────────────
+function startGiveaway(username) {
+  giveaways[username] = { startTime: Date.now() };
+  saveState();
+  render();
+  showToast(`⏱ Giveaway started for ${username}`);
+}
+
+function stopGiveaway(username) {
+  delete giveaways[username];
+  saveState();
+  render();
+}
+
+function addStreamer(username) {
+  username = username.trim().toLowerCase();
+  if (!username) return;
+  if (streamers.find(s => s.username === username)) {
+    showToast(`${username} is already tracked`);
+    return;
+  }
+  streamers.push({ username });
+  saveState();
+  render();
+  showToast(`Added ${username}`);
+}
+
+function removeStreamer(username) {
+  streamers = streamers.filter(s => s.username !== username);
+  delete giveaways[username];
+  saveState();
+  render();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function msToDisplay(ms) {
+  if (ms <= 0) return '0:00';
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function render() {
+  const now = Date.now();
+
+  // Build active giveaway list sorted by least remaining time (ascending)
+  const active = Object.entries(giveaways)
+    .map(([username, { startTime }]) => ({
+      username,
+      remaining: DURATION - (now - startTime),
+    }))
+    .filter(g => g.remaining > 0)
+    .sort((a, b) => a.remaining - b.remaining);
+
+  // Purge expired
+  const expired = Object.entries(giveaways).filter(
+    ([, v]) => now - v.startTime >= DURATION
+  );
+  if (expired.length) {
+    expired.forEach(([u]) => {
+      delete giveaways[u];
+      flashAlert(`🎉 ${u}'s giveaway just ran!`);
+    });
+    saveState();
+  }
+
+  // --- Active giveaways section ---
+  const listEl = document.getElementById('giveawayList');
+  const emptyEl = document.getElementById('giveawayEmpty');
+  const countEl = document.getElementById('activeCount');
+
+  countEl.textContent = active.length;
+
+  if (active.length === 0) {
+    listEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+    listEl.appendChild(emptyEl);
+  } else {
+    emptyEl.style.display = 'none';
+    // Preserve existing cards if username matches to avoid flicker
+    const existing = {};
+    listEl.querySelectorAll('[data-username]').forEach(el => {
+      existing[el.dataset.username] = el;
+    });
+
+    const newOrder = active.map((g, i) => {
+      const pct = (g.remaining / DURATION) * 100;
+      const isUrgent = g.remaining < 60_000;
+      const isWarning = g.remaining < 120_000 && !isUrgent;
+      const colorClass = isUrgent ? 'red' : isWarning ? 'yellow' : 'green';
+      const barColor = isUrgent ? 'var(--red)' : isWarning ? 'var(--yellow)' : 'var(--green)';
+
+      let card = existing[g.username];
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'giveaway-card';
+        card.dataset.username = g.username;
+        card.innerHTML = `
+          <div class="rank ${i === 0 ? 'top' : ''}">${i + 1}</div>
+          <div class="streamer-info">
+            <div class="streamer-name">${escHtml(g.username)}</div>
+          </div>
+          <div class="countdown ${colorClass}">${msToDisplay(g.remaining)}</div>
+          <div class="card-actions">
+            <button class="btn btn-sm btn-danger" data-action="stop" data-user="${escHtml(g.username)}">✕</button>
+          </div>
+        `;
+      } else {
+        card.querySelector('.rank').textContent = i + 1;
+        card.querySelector('.rank').className = `rank ${i === 0 ? 'top' : ''}`;
+        const cd = card.querySelector('.countdown');
+        cd.textContent = msToDisplay(g.remaining);
+        cd.className = `countdown ${colorClass}`;
+      }
+
+      card.className = `giveaway-card${isUrgent ? ' urgent' : isWarning ? ' warning' : ''}`;
+      card.style.setProperty('--progress', `${pct}%`);
+      card.style.setProperty('--bar-color', barColor);
+
+      return card;
+    });
+
+    listEl.innerHTML = '';
+    newOrder.forEach(el => listEl.appendChild(el));
+  }
+
+  // --- Tracked streamers section (idle only) ---
+  const sListEl = document.getElementById('streamerList');
+  const sEmptyEl = document.getElementById('streamerEmpty');
+  const idleStreamers = streamers.filter(s => !giveaways[s.username]);
+
+  if (streamers.length === 0) {
+    sEmptyEl.style.display = 'block';
+    sListEl.innerHTML = '';
+    sListEl.appendChild(sEmptyEl);
+  } else {
+    sEmptyEl.style.display = 'none';
+    sListEl.innerHTML = '';
+    streamers.forEach(s => {
+      const isActive = !!giveaways[s.username];
+      const row = document.createElement('div');
+      row.className = 'streamer-row';
+      row.innerHTML = `
+        <span class="name">${escHtml(s.username)}</span>
+        ${!isActive ? `<button class="btn btn-sm btn-primary" data-action="start" data-user="${escHtml(s.username)}">▶ Start</button>` : `<span style="color:var(--accent);font-size:0.8rem;font-weight:600">LIVE ⏱</span>`}
+        <button class="btn btn-sm btn-ghost" data-action="remove" data-user="${escHtml(s.username)}">Remove</button>
+      `;
+      sListEl.appendChild(row);
+    });
+  }
+}
+
+// ── Toast & alert ─────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+let alertTimer;
+function flashAlert(msg) {
+  const el = document.getElementById('alertBanner');
+  el.textContent = msg;
+  el.style.display = 'block';
+  // Play a beep if possible
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.4);
+  } catch (_) {}
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+// ── Event delegation ──────────────────────────────────────────────────────────
+function escHtml(str) {
+  return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const user = btn.dataset.user;
+  if (action === 'start') startGiveaway(user);
+  if (action === 'stop')  stopGiveaway(user);
+  if (action === 'remove') removeStreamer(user);
+});
+
+document.getElementById('addBtn').addEventListener('click', () => {
+  const input = document.getElementById('usernameInput');
+  addStreamer(input.value);
+  input.value = '';
+  input.focus();
+});
+
+document.getElementById('usernameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    addStreamer(e.target.value);
+    e.target.value = '';
+  }
+});
+
+// ── Tick ──────────────────────────────────────────────────────────────────────
+loadState();
+render();
+setInterval(render, 1000);
+</script>
+</body>
+</html>
