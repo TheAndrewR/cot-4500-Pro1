@@ -92,19 +92,56 @@ function teardown(username) {
 
 // ── Fetch livestream info from Whatnot (uses user's cookies) ──────────────────
 async function fetchStreamerInfo(username) {
-  // Try the URL patterns Whatnot uses for live streams
+  const UUID_PAT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const UUID_G   = new RegExp(UUID_PAT, 'gi');
+
+  // ── Method A: Try Whatnot's JSON API endpoints ────────────────────────────────
+  // These are the most reliable — no HTML scraping needed.
+  const apiEndpoints = [
+    `https://www.whatnot.com/api/live/v1/users/${encodeURIComponent(username)}/livestream`,
+    `https://www.whatnot.com/api/v2/users/${encodeURIComponent(username)}/current_livestream`,
+    `https://www.whatnot.com/api/v2/users/${encodeURIComponent(username)}/active_livestream`,
+  ];
+
+  for (const apiUrl of apiEndpoints) {
+    try {
+      const resp = await fetch(apiUrl, { credentials: 'include', headers: { Accept: 'application/json' } });
+      console.log(`[GiveawayTracker] ${username}: API ${apiUrl} → ${resp.status}`);
+      if (resp.ok) {
+        const ct = resp.headers.get('content-type') ?? '';
+        if (ct.includes('json')) {
+          const data = await resp.json().catch(() => null);
+          if (data) {
+            const id = pickBestUUID(data);
+            if (id) {
+              console.log(`[GiveawayTracker] ${username}: found via API`);
+              // Still need auth tokens from the HTML page
+              const tokens = await fetchAuthTokens(username);
+              return { livestreamId: id, ...tokens };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`[GiveawayTracker] ${username}: API error —`, e.message);
+    }
+  }
+
+  // ── Fetch profile page HTML ───────────────────────────────────────────────────
+  // Try @username first — that's Whatnot's canonical profile URL format.
   const urlsToTry = [
-    `https://www.whatnot.com/live/${username}`,
-    `https://www.whatnot.com/user/${username}`,
     `https://www.whatnot.com/@${username}`,
+    `https://www.whatnot.com/user/${username}`,
+    `https://www.whatnot.com/live/${username}`,
   ];
 
   let html = null;
+  let finalUrl = null;
   for (const url of urlsToTry) {
     try {
       const resp = await fetch(url, { credentials: 'include' });
-      console.log(`[GiveawayTracker] ${username}: GET ${url} → ${resp.status}`);
-      if (resp.ok) { html = await resp.text(); break; }
+      console.log(`[GiveawayTracker] ${username}: GET ${url} → ${resp.status} (landed: ${resp.url})`);
+      if (resp.ok) { html = await resp.text(); finalUrl = resp.url; break; }
       if (resp.status === 404) continue;
     } catch (e) {
       console.log(`[GiveawayTracker] ${username}: fetch error —`, e.message);
@@ -113,43 +150,45 @@ async function fetchStreamerInfo(username) {
 
   if (!html) return { error: 'not_found' };
 
-  // ── Method 1: look for "auction:<uuid>" directly in the HTML ─────────────────
-  // We know Whatnot's WS topic is always "auction:<livestreamId>"
-  const auctionMatch = html.match(
-    /auction[:\\/"']+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
-  );
-  let livestreamId = auctionMatch?.[1] ?? null;
-  if (livestreamId) console.log(`[GiveawayTracker] ${username}: found via auction pattern`);
-
-  // ── Method 2: common key patterns in raw HTML ─────────────────────────────────
-  if (!livestreamId) {
-    const patterns = [
-      /["']livestreamId["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
-      /["']livestream_id["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
-      /["']streamId["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
-      /["']liveId["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
-    ];
-    for (const p of patterns) {
-      const m = html.match(p);
-      if (m) { livestreamId = m[1]; console.log(`[GiveawayTracker] ${username}: found via pattern ${p.source.slice(0,30)}`); break; }
-    }
+  // ── Method B: UUID in the final URL (redirect to a live-stream URL) ───────────
+  let livestreamId = null;
+  const urlUuidMatch = finalUrl?.match(new RegExp(`/(${UUID_PAT})`, 'i'));
+  if (urlUuidMatch) {
+    livestreamId = urlUuidMatch[1];
+    console.log(`[GiveawayTracker] ${username}: found via redirect URL (${finalUrl})`);
   }
 
-  // ── Method 3: parse __NEXT_DATA__ and search every string value ───────────────
+  // ── Method C: "auction:<uuid>" anywhere in the raw HTML ──────────────────────
   if (!livestreamId) {
-    const ndMatch = html.match(/<script id=["']__NEXT_DATA__["'][^>]*>([\s\S]+?)<\/script>/);
+    const m = html.match(new RegExp(`auction[:\\\\/"']+?(${UUID_PAT})`, 'i'));
+    if (m) { livestreamId = m[1]; console.log(`[GiveawayTracker] ${username}: found via auction: pattern`); }
+  }
+
+  // ── Method D: known key names in raw HTML (JSON or JS object literals) ────────
+  if (!livestreamId) {
+    const m = html.match(
+      new RegExp(
+        `["'](?:livestreamId|livestream_id|auctionId|auction_id|streamId|stream_id|liveId|live_id)["']\\s*[=:]\\s*["']?(${UUID_PAT})["']?`,
+        'i'
+      )
+    );
+    if (m) { livestreamId = m[1]; console.log(`[GiveawayTracker] ${username}: found via key-value pattern`); }
+  }
+
+  // ── Method E: parse __NEXT_DATA__ and walk the full tree ─────────────────────
+  if (!livestreamId) {
+    const ndMatch = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]+?)<\/script>/);
     if (ndMatch) {
       try {
         const nd = JSON.parse(ndMatch[1]);
-        livestreamId = deepFindLivestreamId(nd, 0);
-        if (livestreamId) console.log(`[GiveawayTracker] ${username}: found via __NEXT_DATA__ deep search`);
+        livestreamId = pickBestUUID(nd);
+        if (livestreamId) console.log(`[GiveawayTracker] ${username}: found via __NEXT_DATA__`);
+        else console.log(`[GiveawayTracker] ${username}: __NEXT_DATA__ has no suitable UUID —`, ndMatch[1].slice(0, 600));
       } catch (e) {
-        console.log(`[GiveawayTracker] ${username}: __NEXT_DATA__ parse failed —`, e.message);
+        console.log(`[GiveawayTracker] ${username}: __NEXT_DATA__ parse error —`, e.message);
       }
     } else {
-      console.log(`[GiveawayTracker] ${username}: no __NEXT_DATA__ script tag found`);
-      // Log a snippet of the HTML to help diagnose
-      console.log(`[GiveawayTracker] ${username}: HTML snippet —`, html.slice(0, 500));
+      console.log(`[GiveawayTracker] ${username}: no __NEXT_DATA__ tag — HTML snippet:`, html.slice(0, 800));
     }
   }
 
@@ -168,25 +207,44 @@ async function fetchStreamerInfo(username) {
   return { livestreamId, csrfToken, sessionExtensionToken };
 }
 
-// Walk the entire __NEXT_DATA__ object collecting every UUID, then pick the best candidate
-function deepFindLivestreamId(obj, depth) {
-  if (depth > 30 || !obj || typeof obj !== 'object') return null;
-
-  for (const [key, val] of Object.entries(obj)) {
-    const k = key.toLowerCase();
-    if (typeof val === 'string' && UUID_RE.test(val)) {
-      // Prefer keys that explicitly mention livestream / auction / stream / live
-      if (k.includes('livestream') || k.includes('auction') ||
-          k.includes('stream') || k === 'id' || k.includes('live')) {
-        return val;
-      }
-    }
-    const found = Array.isArray(val)
-      ? val.reduce((acc, item) => acc ?? deepFindLivestreamId(item, depth + 1), null)
-      : deepFindLivestreamId(val, depth + 1);
-    if (found) return found;
+// Fetch just the auth tokens from the profile page (used when API gave us the livestream ID)
+async function fetchAuthTokens(username) {
+  try {
+    const resp = await fetch(`https://www.whatnot.com/@${username}`, { credentials: 'include' });
+    if (!resp.ok) return { csrfToken: null, sessionExtensionToken: null };
+    const html = await resp.text();
+    const csrfMeta  = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/);
+    const csrfJson  = html.match(/["']_csrf_token["']\s*:\s*["']([^"']{20,})["']/);
+    const csrfToken = csrfMeta?.[1] ?? csrfJson?.[1] ?? null;
+    const tokenMatch = html.match(/sessionExtensionToken["':\s]+["']?(SFMyNTY[A-Za-z0-9._-]+)/);
+    return { csrfToken, sessionExtensionToken: tokenMatch?.[1] ?? null };
+  } catch {
+    return { csrfToken: null, sessionExtensionToken: null };
   }
-  return null;
+}
+
+// Walk a JSON tree and return the best UUID candidate, ranked by key name.
+// Collects ALL UUIDs before picking — avoids returning a user-id before the livestream id.
+function pickBestUUID(obj) {
+  const HIGH = ['auction', 'livestream'];
+  const MED  = ['stream', 'live'];
+  let high = null, med = null;
+
+  function walk(o, depth) {
+    if (depth > 30 || !o || typeof o !== 'object') return;
+    for (const [key, val] of Object.entries(o)) {
+      const k = key.toLowerCase();
+      if (typeof val === 'string' && UUID_RE.test(val)) {
+        if (!high && HIGH.some(h => k.includes(h))) { high = val; continue; }
+        if (!med  && MED.some(m => k.includes(m)))  { med  = val; continue; }
+      }
+      if (Array.isArray(val)) val.forEach(item => walk(item, depth + 1));
+      else if (val && typeof val === 'object') walk(val, depth + 1);
+    }
+  }
+
+  walk(obj, 0);
+  return high ?? med ?? null;
 }
 
 // ── WebSocket connection ───────────────────────────────────────────────────────
