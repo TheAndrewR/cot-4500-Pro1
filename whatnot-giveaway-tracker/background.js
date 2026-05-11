@@ -92,65 +92,101 @@ function teardown(username) {
 
 // ── Fetch livestream info from Whatnot (uses user's cookies) ──────────────────
 async function fetchStreamerInfo(username) {
-  let html;
-  try {
-    const resp = await fetch(`https://www.whatnot.com/live/${username}`, {
-      credentials: 'include',
-    });
-    if (resp.status === 404) return { error: 'not_found' };
-    if (!resp.ok)            return { error: 'fetch_failed' };
-    html = await resp.text();
-  } catch {
-    return { error: 'network_error' };
+  // Try the URL patterns Whatnot uses for live streams
+  const urlsToTry = [
+    `https://www.whatnot.com/live/${username}`,
+    `https://www.whatnot.com/user/${username}`,
+    `https://www.whatnot.com/@${username}`,
+  ];
+
+  let html = null;
+  for (const url of urlsToTry) {
+    try {
+      const resp = await fetch(url, { credentials: 'include' });
+      console.log(`[GiveawayTracker] ${username}: GET ${url} → ${resp.status}`);
+      if (resp.ok) { html = await resp.text(); break; }
+      if (resp.status === 404) continue;
+    } catch (e) {
+      console.log(`[GiveawayTracker] ${username}: fetch error —`, e.message);
+    }
   }
 
-  // CSRF token (Phoenix apps put this in a meta tag)
-  const csrfMatch = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/);
-  const csrfToken = csrfMatch?.[1] ?? null;
+  if (!html) return { error: 'not_found' };
 
-  // Next.js data blob (Whatnot runs on Next.js)
-  const ndMatch = html.match(/<script id=["']__NEXT_DATA__["'][^>]*>(\{[\s\S]*?\})<\/script>/);
-  if (!ndMatch) return { error: 'no_next_data', csrfToken };
+  // ── Method 1: look for "auction:<uuid>" directly in the HTML ─────────────────
+  // We know Whatnot's WS topic is always "auction:<livestreamId>"
+  const auctionMatch = html.match(
+    /auction[:\\/"']+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  let livestreamId = auctionMatch?.[1] ?? null;
+  if (livestreamId) console.log(`[GiveawayTracker] ${username}: found via auction pattern`);
 
-  let nd;
-  try { nd = JSON.parse(ndMatch[1]); }
-  catch { return { error: 'parse_failed', csrfToken }; }
+  // ── Method 2: common key patterns in raw HTML ─────────────────────────────────
+  if (!livestreamId) {
+    const patterns = [
+      /["']livestreamId["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
+      /["']livestream_id["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
+      /["']streamId["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
+      /["']liveId["']\s*:\s*["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']/i,
+    ];
+    for (const p of patterns) {
+      const m = html.match(p);
+      if (m) { livestreamId = m[1]; console.log(`[GiveawayTracker] ${username}: found via pattern ${p.source.slice(0,30)}`); break; }
+    }
+  }
 
-  const result = { csrfToken };
-  deepSearch(nd, result, 0);
+  // ── Method 3: parse __NEXT_DATA__ and search every string value ───────────────
+  if (!livestreamId) {
+    const ndMatch = html.match(/<script id=["']__NEXT_DATA__["'][^>]*>([\s\S]+?)<\/script>/);
+    if (ndMatch) {
+      try {
+        const nd = JSON.parse(ndMatch[1]);
+        livestreamId = deepFindLivestreamId(nd, 0);
+        if (livestreamId) console.log(`[GiveawayTracker] ${username}: found via __NEXT_DATA__ deep search`);
+      } catch (e) {
+        console.log(`[GiveawayTracker] ${username}: __NEXT_DATA__ parse failed —`, e.message);
+      }
+    } else {
+      console.log(`[GiveawayTracker] ${username}: no __NEXT_DATA__ script tag found`);
+      // Log a snippet of the HTML to help diagnose
+      console.log(`[GiveawayTracker] ${username}: HTML snippet —`, html.slice(0, 500));
+    }
+  }
 
-  if (!result.livestreamId) return { error: 'not_live', csrfToken };
-  return result;
+  console.log(`[GiveawayTracker] ${username}: livestreamId = ${livestreamId ?? 'NOT FOUND'}`);
+  if (!livestreamId) return { error: 'not_live' };
+
+  // ── Auth tokens ───────────────────────────────────────────────────────────────
+  const csrfMeta  = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/);
+  const csrfJson  = html.match(/["']_csrf_token["']\s*:\s*["']([^"']{20,})["']/);
+  const csrfToken = csrfMeta?.[1] ?? csrfJson?.[1] ?? null;
+
+  const tokenMatch = html.match(/sessionExtensionToken["':\s]+["']?(SFMyNTY[A-Za-z0-9._-]+)/);
+  const sessionExtensionToken = tokenMatch?.[1] ?? null;
+
+  console.log(`[GiveawayTracker] ${username}: csrfToken=${csrfToken ? 'found' : 'missing'} sessionToken=${sessionExtensionToken ? 'found' : 'missing'}`);
+  return { livestreamId, csrfToken, sessionExtensionToken };
 }
 
-// Recursively walk the Next.js data object looking for what we need
-function deepSearch(obj, out, depth) {
-  if (depth > 25 || !obj || typeof obj !== 'object') return;
+// Walk the entire __NEXT_DATA__ object collecting every UUID, then pick the best candidate
+function deepFindLivestreamId(obj, depth) {
+  if (depth > 30 || !obj || typeof obj !== 'object') return null;
 
   for (const [key, val] of Object.entries(obj)) {
     const k = key.toLowerCase();
-
-    if (typeof val === 'string') {
-      // Livestream UUID
-      if (!out.livestreamId && UUID_RE.test(val) &&
-          (k === 'livestreamid' || k === 'id' || k.includes('livestream'))) {
-        out.livestreamId = val;
+    if (typeof val === 'string' && UUID_RE.test(val)) {
+      // Prefer keys that explicitly mention livestream / auction / stream / live
+      if (k.includes('livestream') || k.includes('auction') ||
+          k.includes('stream') || k === 'id' || k.includes('live')) {
+        return val;
       }
-      // Phoenix session token
-      if (!out.sessionExtensionToken &&
-          (k.includes('sessionextension') || val.startsWith('SFMyNTY'))) {
-        out.sessionExtensionToken = val;
-      }
-      // CSRF fallback
-      if (!out.csrfToken && k.includes('csrf')) {
-        out.csrfToken = val;
-      }
-    } else if (Array.isArray(val)) {
-      for (const item of val) deepSearch(item, out, depth + 1);
-    } else if (val && typeof val === 'object') {
-      deepSearch(val, out, depth + 1);
     }
+    const found = Array.isArray(val)
+      ? val.reduce((acc, item) => acc ?? deepFindLivestreamId(item, depth + 1), null)
+      : deepFindLivestreamId(val, depth + 1);
+    if (found) return found;
   }
+  return null;
 }
 
 // ── WebSocket connection ───────────────────────────────────────────────────────
