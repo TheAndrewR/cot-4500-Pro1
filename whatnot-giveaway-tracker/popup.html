@@ -2,30 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Whatnot Giveaway Tracker</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="header">
+    <span class="logo">⚡</span>
     <h1>Giveaway Tracker</h1>
-    <p class="subtitle">Soonest ending on top</p>
   </div>
 
-  <div class="manual-section">
-    <input
-      id="usernameInput"
-      type="text"
-      placeholder="Streamer username..."
-      autocomplete="off"
-      spellcheck="false"
-    />
-    <button id="addBtn">Start</button>
+  <div class="add-row">
+    <input id="usernameInput" type="text" placeholder="Streamer username..." autocomplete="off" spellcheck="false" />
+    <button id="addBtn">Watch</button>
   </div>
 
-  <div id="giveawayList" class="giveaway-list">
-    <div class="empty-state">No active giveaways.<br />Open a Whatnot stream to auto-detect.</div>
-  </div>
+  <!-- Active giveaway countdowns (auto-sorted, soonest first) -->
+  <section id="giveawaySection" class="hidden">
+    <div class="section-label">Active Giveaways</div>
+    <div id="giveawayList"></div>
+  </section>
+
+  <!-- All watched streamers -->
+  <section id="streamerSection">
+    <div class="section-label">Watching</div>
+    <div id="streamerList">
+      <div class="empty-state">No streamers added yet.</div>
+    </div>
+  </section>
 
   <script src="popup.js"></script>
 </body>

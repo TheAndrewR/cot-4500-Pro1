@@ -1,90 +1,130 @@
-const GIVEAWAY_DURATION_MS = 5 * 60 * 1000;
+const GIVEAWAY_MS = 5 * 60 * 1000;
 
-const listEl = document.getElementById('giveawayList');
-const input = document.getElementById('usernameInput');
-const addBtn = document.getElementById('addBtn');
+const usernameInput   = document.getElementById('usernameInput');
+const addBtn          = document.getElementById('addBtn');
+const giveawaySection = document.getElementById('giveawaySection');
+const giveawayList    = document.getElementById('giveawayList');
+const streamerSection = document.getElementById('streamerSection');
+const streamerList    = document.getElementById('streamerList');
 
-function formatTime(ms) {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function urgencyClass(remaining) {
-  if (remaining <= 60000) return 'urgent';
-  if (remaining <= 120000) return 'warning';
-  return 'normal';
-}
-
-function render(giveaways) {
-  const entries = Object.entries(giveaways).sort(
-    ([, a], [, b]) => a.remaining - b.remaining
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])
   );
+}
 
-  if (entries.length === 0) {
-    listEl.innerHTML =
-      '<div class="empty-state">No active giveaways.<br/>Open a Whatnot stream to auto-detect.</div>';
-    return;
+function fmt(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function urgency(ms) {
+  if (ms <= 60_000)  return 'urgent';
+  if (ms <= 120_000) return 'warning';
+  return 'ok';
+}
+
+const STATUS_LABEL = {
+  connecting:   { dot: 'dot-yellow', text: 'Connecting…' },
+  live:         { dot: 'dot-green',  text: 'Live' },
+  offline:      { dot: 'dot-gray',   text: 'Not live' },
+  reconnecting: { dot: 'dot-yellow', text: 'Reconnecting…' },
+  error:        { dot: 'dot-red',    text: 'Error' },
+  not_found:    { dot: 'dot-red',    text: 'Not found' },
+};
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+function render({ streamers, giveaways }) {
+  // ── Active giveaway cards (sorted soonest first) ────────────────────────────
+  const gEntries = Object.entries(giveaways).sort(([, a], [, b]) => a.remaining - b.remaining);
+
+  if (gEntries.length === 0) {
+    giveawaySection.classList.add('hidden');
+  } else {
+    giveawaySection.classList.remove('hidden');
+    giveawayList.innerHTML = '';
+
+    for (const [username, { remaining }] of gEntries) {
+      const pct = Math.min(100, (remaining / GIVEAWAY_MS) * 100).toFixed(1);
+      const u   = urgency(remaining);
+      const card = document.createElement('div');
+      card.className = `giveaway-card ${u}`;
+      card.innerHTML = `
+        <div class="card-row">
+          <span class="g-username">@${esc(username)}</span>
+          <span class="g-time ${u}">${fmt(remaining)}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar ${u}" style="width:${pct}%"></div>
+        </div>
+      `;
+      giveawayList.appendChild(card);
+    }
   }
 
-  listEl.innerHTML = '';
+  // ── Watched streamers list ──────────────────────────────────────────────────
+  const sEntries = Object.entries(streamers);
 
-  for (const [username, { remaining }] of entries) {
-    const pct = Math.min(100, (remaining / GIVEAWAY_DURATION_MS) * 100);
-    const cls = urgencyClass(remaining);
+  if (sEntries.length === 0) {
+    streamerList.innerHTML = '<div class="empty-state">No streamers added yet.</div>';
+  } else {
+    streamerList.innerHTML = '';
 
-    const card = document.createElement('div');
-    card.className = `giveaway-card ${cls}`;
-    card.innerHTML = `
-      <div class="card-top">
-        <span class="username">@${escapeHtml(username)}</span>
-        <span class="countdown ${cls}">${formatTime(remaining)}</span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-bar ${cls}" style="width:${pct.toFixed(1)}%"></div>
-      </div>
-      <div class="card-actions">
-        <button class="dismiss-btn" data-username="${escapeHtml(username)}">Dismiss</button>
-      </div>
-    `;
-    listEl.appendChild(card);
-  }
+    for (const [username, { status }] of sEntries) {
+      const { dot, text } = STATUS_LABEL[status] ?? { dot: 'dot-gray', text: status };
+      const hasGiveaway = Boolean(giveaways[username]);
 
-  listEl.querySelectorAll('.dismiss-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const username = btn.dataset.username;
-      chrome.runtime.sendMessage({ type: 'REMOVE_GIVEAWAY', username });
+      const row = document.createElement('div');
+      row.className = `streamer-row${hasGiveaway ? ' has-giveaway' : ''}`;
+      row.innerHTML = `
+        <span class="dot ${dot}"></span>
+        <span class="s-name">@${esc(username)}</span>
+        <span class="s-status">${text}</span>
+        <button class="remove-btn" data-username="${esc(username)}" title="Stop watching">✕</button>
+      `;
+      streamerList.appendChild(row);
+    }
+
+    streamerList.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'REMOVE_STREAMER', username: btn.dataset.username });
+      });
     });
-  });
+  }
 }
 
-function escapeHtml(str) {
-  return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
+// ── Poll background for state ─────────────────────────────────────────────────
 function poll() {
-  chrome.runtime.sendMessage({ type: 'GET_GIVEAWAYS' }, (response) => {
-    if (chrome.runtime.lastError) return;
-    render(response?.giveaways ?? {});
+  chrome.runtime.sendMessage({ type: 'GET_STATE' }, resp => {
+    if (chrome.runtime.lastError || !resp) return;
+    render(resp);
   });
 }
 
-// Refresh every second
 poll();
 setInterval(poll, 1000);
 
-// Manual start
-function manualStart() {
-  const username = input.value.trim().replace(/^@/, '');
-  if (!username) return;
-  chrome.runtime.sendMessage({ type: 'GIVEAWAY_MANUAL', username }, () => {
-    input.value = '';
+// ── Add streamer ───────────────────────────────────────────────────────────────
+function addStreamer() {
+  const raw = usernameInput.value.trim().replace(/^@/, '');
+  if (!raw) return;
+
+  addBtn.disabled = true;
+  addBtn.textContent = '…';
+
+  chrome.runtime.sendMessage({ type: 'ADD_STREAMER', username: raw }, resp => {
+    addBtn.disabled = false;
+    addBtn.textContent = 'Watch';
+    if (resp?.error === 'already_added') {
+      usernameInput.style.borderColor = '#f59e0b';
+      setTimeout(() => { usernameInput.style.borderColor = ''; }, 1500);
+    } else {
+      usernameInput.value = '';
+    }
     poll();
   });
 }
 
-addBtn.addEventListener('click', manualStart);
-input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') manualStart();
-});
+addBtn.addEventListener('click', addStreamer);
+usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') addStreamer(); });
