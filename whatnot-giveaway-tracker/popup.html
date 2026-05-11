@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whatnot Giveaway Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="header">
+    <h1>Giveaway Tracker</h1>
+    <p class="subtitle">Soonest ending on top</p>
+  </div>
+
+  <div class="manual-section">
+    <input
+      id="usernameInput"
+      type="text"
+      placeholder="Streamer username..."
+      autocomplete="off"
+      spellcheck="false"
+    />
+    <button id="addBtn">Start</button>
+  </div>
+
+  <div id="giveawayList" class="giveaway-list">
+    <div class="empty-state">No active giveaways.<br />Open a Whatnot stream to auto-detect.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
