@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Whatnot Giveaway Tracker",
+  "version": "0.2.0",
+  "description": "Polls Whatnot's API from a single tab to detect pinned giveaways across multiple streamers and forwards events to the local tracker.",
+  "host_permissions": [
+    "*://*.whatnot.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.whatnot.com/*"],
+      "js": ["config.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Whatnot Giveaway Tracker"
+  }
+}
