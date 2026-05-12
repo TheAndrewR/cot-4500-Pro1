@@ -1,75 +1,60 @@
 # Whatnot Giveaway Tracker — Browser Extension
 
-Polls Whatnot's API from a single open tab to detect when each tracked
-streamer pins a giveaway, then forwards the event to the local tracker app
-(`TopLevel/src/main/whatnot_tracker.py`) on `http://127.0.0.1:7755`.
+No configuration needed. The endpoint and query are already filled in based on
+Whatnot's LiveShopFeed GraphQL API.
 
-You only need ONE Whatnot tab open (the home page works fine). The extension
-does NOT need to be on each streamer's live page.
-
-> **Caveat:** This depends on Whatnot exposing pinned-giveaway state via a
-> pollable HTTP endpoint. If the data is delivered only over WebSocket, this
-> approach will not work and you'll need the background-tabs alternative
-> instead. The first step below tells you which it is.
-
-> **ToS note:** This polls Whatnot's internal (undocumented) API using your
-> logged-in cookies. That may violate their Terms of Service. Use at your own
-> risk; keep `POLL_INTERVAL_MS` reasonable (default 10s).
-
-## Install
+## How to install
 
 1. Start the tracker: `python3 TopLevel/src/main/whatnot_tracker.py`
-   (Tk window should say *Listening on 127.0.0.1:7755*).
-2. Open `chrome://extensions`, enable **Developer mode**, click
-   **Load unpacked**, and pick this `TopLevel/extension` folder.
-3. Open `https://www.whatnot.com/` in a tab and leave it open. That tab is
-   where the polling runs.
+   The window should say *Listening on 127.0.0.1:7755*.
+2. Open `chrome://extensions`, enable **Developer mode** (top-right toggle).
+3. Click **Load unpacked** and select this `TopLevel/extension` folder.
+4. Open **any** `https://www.whatnot.com/` tab and leave it open — the home
+   page is fine. The extension runs its polling loop inside that tab.
 
-Until you complete the configuration below, the extension is inert -- it just
-logs a warning and exits. The Tk app's manual buttons still work.
+## How to use
 
-## Finding the endpoint (one-time configuration)
+1. In the Tk app, type a Whatnot **username** (e.g. `cardboard47`) and click Add.
+2. The extension fetches that streamer's live page every 10 seconds to check
+   the current giveaway section. When a new giveaway listing appears, it
+   sends a pin event to the tracker and a 5:00 countdown starts.
+3. The countdown is adjusted for how long the giveaway has already been
+   running, so if you add a streamer mid-giveaway you'll see ~3:00 remaining
+   instead of the full 5:00.
+4. The list auto-sorts so the soonest-ending giveaway is always on top.
+5. Expired timers stay on the list so you keep tracking the next pin.
 
-The extension doesn't know Whatnot's endpoint -- you have to discover it once.
+## Debugging
 
-1. Log in to Whatnot.
-2. Open a live stream that you can see has a **pinned giveaway** banner.
-3. Open **DevTools → Network**. Filter by `Fetch/XHR`. Reload the page.
-4. Look for a request that returns the giveaway info. Candidates:
-   - Anything with `giveaway` in the URL or response body.
-   - A GraphQL POST to `/graphql` with an operationName like
-     `LiveStream`, `LivePageData`, `PinnedGiveaway`, etc.
-   - A REST GET like `/api/livestreams/<slug>/...` or `/api/users/<slug>/live`.
-5. Click the request → **Response** tab. Find the field that uniquely
-   identifies the pinned giveaway (an `id`, `giveawayId`, etc.). Confirm it
-   changes when a different giveaway is pinned.
-6. If the only thing transporting giveaway data is a `wss://` WebSocket and
-   no HTTP endpoint returns the same info: **stop**. Polling won't work; we'll
-   need the background-tabs approach instead.
+Open DevTools on your Whatnot tab → Console. You'll see:
 
-Once you have a URL and a response shape, edit `config.js`:
+```
+[whatnot-tracker] started, session: <uuid>
+[whatnot-tracker] cardboard47 -> a61ba099-... (Next.js data)
+[whatnot-tracker] NEW pin: cardboard47 giveaway=TGlzdGluZ... updatedAt=1778564701430
+```
 
-- `buildRequest(streamer)` — return `{ url, init }` describing the fetch.
-- `extractGiveawayId(json)` — return the id field, or `null` if none.
+If you see `"could not find liveId for ..."`:
+- The streamer may not be live yet (the extension will keep retrying every 10 min).
+- Or Whatnot changed their page structure. In that case, open DevTools → Network
+  on the live page, find a POST to `/graphql` with `operationName: "LiveShopFeed"`,
+  copy the `liveId` UUID from its variables, and paste it into the tracker manually
+  via the Pin button as a workaround.
 
-Reload the extension after editing (`chrome://extensions` → reload button on
-the extension card).
+## Architecture
 
-## Verifying it works
+```
+[whatnot.com tab]
+  content.js
+    ├── every 5s:  GET  http://127.0.0.1:7755/streamers  → list of usernames
+    └── every 10s: per streamer:
+          1. fetch https://www.whatnot.com/live/<username>  → extract liveId UUID
+          2. POST  https://www.whatnot.com/graphql  LiveShopFeed query
+          3. if new giveaway in SHOP_GIVEAWAYS section:
+               POST http://127.0.0.1:7755/pin  { streamer, fingerprint, startedAt }
 
-1. Add a streamer in the Tk app.
-2. Switch to your Whatnot home-page tab and open its DevTools console.
-3. You should see `[whatnot-tracker] started; tracker = ...` and, every
-   10 seconds, debug lines like `pin sent <streamer>=<id> -> 200` once a
-   giveaway gets pinned. If you see *"buildRequest() returns null"*, config
-   isn't applied yet.
-4. The Tk app will start a 5:00 countdown for that streamer and bubble them
-   toward the top of the list as the timer drops.
-
-## Endpoints used by the tracker
-
-- `GET  http://127.0.0.1:7755/streamers` → `{"streamers": [...]}`
-- `POST http://127.0.0.1:7755/pin`       → `{"streamer", "ts", "fingerprint"}`
-
-CORS is open (`Access-Control-Allow-Origin: *`) so the extension can reach
-both from a `whatnot.com` content script.
+[Tk app]
+  HTTP server on 127.0.0.1:7755
+    GET  /streamers  → JSON list of tracked usernames
+    POST /pin        → starts/updates countdown for that streamer
+```

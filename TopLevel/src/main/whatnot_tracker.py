@@ -61,10 +61,11 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/pin":
             name = (payload.get("streamer") or "").strip()
             fp = (payload.get("fingerprint") or "").strip()
+            started_at = payload.get("startedAt")  # epoch ms; tells us how long it's been running
             if not name:
                 self._send(400, b'{"error":"missing streamer"}')
                 return
-            _events.put({"type": "pin", "name": name, "fingerprint": fp})
+            _events.put({"type": "pin", "name": name, "fingerprint": fp, "started_at": started_at})
             self._send(200, b'{"ok":true}')
         else:
             self._send(404, b'{"error":"not found"}')
@@ -103,7 +104,15 @@ class StreamerRow:
         self.remove_btn = ttk.Button(self.frame, text="Remove", width=8, command=lambda: on_remove(self))
         self.remove_btn.grid(row=0, column=3)
 
-    def start_timer(self):
+    def start_timer(self, started_at_ms=None):
+        if started_at_ms is not None:
+            # updatedAtMs from Whatnot tells us when the giveaway was last changed (i.e. pinned).
+            # Calculate how long it has already been running so the countdown reflects reality.
+            elapsed_s = (time.time() * 1000 - started_at_ms) / 1000
+            remaining_s = GIVEAWAY_SECONDS - elapsed_s
+            if 0 < remaining_s < GIVEAWAY_SECONDS:
+                self.deadline = time.monotonic() + remaining_s
+                return
         self.deadline = time.monotonic() + GIVEAWAY_SECONDS
 
     def remaining(self):
@@ -227,7 +236,7 @@ class TrackerApp:
             if fp and fp == row.last_fingerprint:
                 continue
             row.last_fingerprint = fp
-            row.start_timer()
+            row.start_timer(ev.get("started_at"))
 
     # ----- main loop -----
 
